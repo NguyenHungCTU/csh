@@ -4,39 +4,48 @@ set thunder_src = "/home/project/post/thunder_merge"
 set pv_src      = "/home/project/verify/temp"
 set rcsi_src    = "/home/project/pr/RCSI/temp"
 set layout_root = "/home/project/postLayout"
+set log_file    = "$layout_root/version_manager.log"
 
-# Get vername from argument, or enter it interactively.
-if ($#argv >= 1) then
-    set vername = "$argv[1]"
+set action  = ""
+set vername = ""
+
+# Interactive menu, command mode, and backward-compatible make mode.
+if ($#argv == 0) then
+    echo ""
+    echo "1. Make version folders"
+    echo "2. Delete version folders"
+    echo -n "Select action [1/2]: "
+    set choice = "$<"
+
+    if ("$choice" == "1") then
+        set action = "make"
+    else if ("$choice" == "2") then
+        set action = "delete"
+    else
+        echo "ERROR: Invalid selection."
+        exit 1
+    endif
 else
+    if ("$argv[1]" == "make" || "$argv[1]" == "delete") then
+        set action = "$argv[1]"
+        if ($#argv >= 2) then
+            set vername = "$argv[2]"
+        endif
+    else
+        set action  = "make"
+        set vername = "$argv[1]"
+    endif
+endif
+
+if ("$vername" == "") then
     echo -n "Enter vername: "
     set vername = "$<"
 endif
 
-# Keep vername safe for both the directory name and sed replacement.
+# Keep vername safe for directory names, sed, and delete targets.
 echo "$vername" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$'
 if ($status != 0) then
     echo "ERROR: Invalid vername."
-    exit 1
-endif
-
-set thunder_run = "/home/project/post/$vername"
-set pv_run      = "/home/project/verify/$vername"
-set rcsi_run    = "/home/project/pr/RCSI/$vername"
-set layout_run  = "$layout_root/$vername"
-
-if ( ! -d "$thunder_src" ) then
-    echo "ERROR: Source not found: $thunder_src"
-    exit 1
-endif
-
-if ( ! -d "$pv_src" ) then
-    echo "ERROR: Source not found: $pv_src"
-    exit 1
-endif
-
-if ( ! -d "$rcsi_src" ) then
-    echo "ERROR: Source not found: $rcsi_src"
     exit 1
 endif
 
@@ -45,58 +54,152 @@ if ( ! -d "$layout_root" ) then
     exit 1
 endif
 
-if ( -e "$thunder_run" ) then
-    echo "ERROR: Version already exists: $thunder_run"
-    exit 1
-endif
-
-if ( -e "$pv_run" ) then
-    echo "ERROR: Version already exists: $pv_run"
-    exit 1
-endif
-
-if ( -e "$rcsi_run" ) then
-    echo "ERROR: Version already exists: $rcsi_run"
-    exit 1
-endif
-
-if ( -e "$layout_run" ) then
-    echo "ERROR: Version already exists: $layout_run"
-    exit 1
-endif
-
-# Create Thunder Merge, PV, and RCSI run directories.
-cp -R "$thunder_src" "$thunder_run"
-if ($status != 0) exit 1
-
-cp -R "$pv_src" "$pv_run"
-if ($status != 0) exit 1
-
-cp -R "$rcsi_src" "$rcsi_run"
-if ($status != 0) exit 1
-
-# Replace DVER in all copied text files that contain it.
-grep -rIlZ -- 'DVER' "$thunder_run" "$pv_run" "$rcsi_run" | xargs -0 -r sed -i "s/DVER/$vername/g"
+# The history log must be writable before any create or delete operation.
+touch "$log_file"
 if ($status != 0) then
-    echo "ERROR: Failed to replace DVER."
+    echo "ERROR: Cannot write log file: $log_file"
     exit 1
 endif
 
-# Create one layout directory containing links to all run directories.
-mkdir "$layout_run"
-if ($status != 0) exit 1
+set thunder_run = "/home/project/post/$vername"
+set pv_run      = "/home/project/verify/$vername"
+set rcsi_run    = "/home/project/pr/RCSI/$vername"
+set layout_run  = "$layout_root/$vername"
 
-ln -s "$thunder_run" "$layout_run/thunder_merge"
-if ($status != 0) exit 1
+if ("$action" == "make") then
+    set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+    echo "[$timestamp] MAKE $vername START" | tee -a "$log_file"
 
-ln -s "$pv_run" "$layout_run/PV"
-if ($status != 0) exit 1
+    # Check every source and destination before copying.
+    foreach source ("$thunder_src" "$pv_src" "$rcsi_src")
+        if ( ! -d "$source" ) then
+            set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+            echo "[$timestamp] MAKE $vername ERROR source_not_found=$source" | tee -a "$log_file"
+            exit 1
+        endif
+    end
 
-ln -s "$rcsi_run" "$layout_run/RCSI"
-if ($status != 0) exit 1
+    foreach target ("$thunder_run" "$pv_run" "$rcsi_run" "$layout_run")
+        if ( -e "$target" ) then
+            set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+            echo "[$timestamp] MAKE $vername ERROR target_exists=$target" | tee -a "$log_file"
+            exit 1
+        endif
+    end
 
-echo "Thunder Merge: $thunder_run"
-echo "PV            : $pv_run"
-echo "RCSI          : $rcsi_run"
-echo "Post Layout   : $layout_run"
-exit 0
+    set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+    echo "[$timestamp] COPY $thunder_src -> $thunder_run" | tee -a "$log_file"
+    cp -R "$thunder_src" "$thunder_run"
+    if ($status != 0) then
+        set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+        echo "[$timestamp] MAKE $vername ERROR copy_failed=$thunder_run" | tee -a "$log_file"
+        exit 1
+    endif
+
+    set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+    echo "[$timestamp] COPY $pv_src -> $pv_run" | tee -a "$log_file"
+    cp -R "$pv_src" "$pv_run"
+    if ($status != 0) then
+        set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+        echo "[$timestamp] MAKE $vername ERROR copy_failed=$pv_run" | tee -a "$log_file"
+        exit 1
+    endif
+
+    set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+    echo "[$timestamp] COPY $rcsi_src -> $rcsi_run" | tee -a "$log_file"
+    cp -R "$rcsi_src" "$rcsi_run"
+    if ($status != 0) then
+        set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+        echo "[$timestamp] MAKE $vername ERROR copy_failed=$rcsi_run" | tee -a "$log_file"
+        exit 1
+    endif
+
+    set dver_files = `grep -rIl -- 'DVER' "$thunder_run" "$pv_run" "$rcsi_run" | wc -l`
+    grep -rIlZ -- 'DVER' "$thunder_run" "$pv_run" "$rcsi_run" | xargs -0 -r sed -i "s/DVER/$vername/g"
+    if ($status != 0) then
+        set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+        echo "[$timestamp] MAKE $vername ERROR replace_DVER_failed" | tee -a "$log_file"
+        exit 1
+    endif
+
+    set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+    echo "[$timestamp] REPLACE DVER -> $vername files=$dver_files" | tee -a "$log_file"
+
+    mkdir "$layout_run"
+    if ($status != 0) then
+        set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+        echo "[$timestamp] MAKE $vername ERROR mkdir_failed=$layout_run" | tee -a "$log_file"
+        exit 1
+    endif
+
+    ln -s "$thunder_run" "$layout_run/thunder_merge"
+    if ($status != 0) then
+        set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+        echo "[$timestamp] MAKE $vername ERROR link_failed=thunder_merge" | tee -a "$log_file"
+        exit 1
+    endif
+
+    ln -s "$pv_run" "$layout_run/PV"
+    if ($status != 0) then
+        set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+        echo "[$timestamp] MAKE $vername ERROR link_failed=PV" | tee -a "$log_file"
+        exit 1
+    endif
+
+    ln -s "$rcsi_run" "$layout_run/RCSI"
+    if ($status != 0) then
+        set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+        echo "[$timestamp] MAKE $vername ERROR link_failed=RCSI" | tee -a "$log_file"
+        exit 1
+    endif
+
+    set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+    echo "[$timestamp] LINK $layout_run SUCCESS" | tee -a "$log_file"
+    echo "[$timestamp] MAKE $vername SUCCESS" | tee -a "$log_file"
+    exit 0
+endif
+
+if ("$action" == "delete") then
+    echo ""
+    echo "Delete the following targets:"
+    echo "  $layout_run"
+    echo "  $thunder_run"
+    echo "  $pv_run"
+    echo "  $rcsi_run"
+    echo -n "Confirm delete $vername [y/N]: "
+    set confirm = "$<"
+
+    if ("$confirm" != "y" && "$confirm" != "Y") then
+        set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+        echo "[$timestamp] DELETE $vername CANCELLED" | tee -a "$log_file"
+        exit 0
+    endif
+
+    set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+    echo "[$timestamp] DELETE $vername START" | tee -a "$log_file"
+
+    # Only exact validated version paths are removed; no globs are used.
+    foreach target ("$layout_run" "$thunder_run" "$pv_run" "$rcsi_run")
+        if ( -e "$target" ) then
+            rm -rf -- "$target"
+            if ($status != 0) then
+                set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+                echo "[$timestamp] DELETE $vername ERROR remove_failed=$target" | tee -a "$log_file"
+                exit 1
+            endif
+
+            set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+            echo "[$timestamp] REMOVED $target" | tee -a "$log_file"
+        else
+            set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+            echo "[$timestamp] SKIP not_found=$target" | tee -a "$log_file"
+        endif
+    end
+
+    set timestamp = "`date '+%Y-%m-%d %H:%M:%S'`"
+    echo "[$timestamp] DELETE $vername SUCCESS" | tee -a "$log_file"
+    exit 0
+endif
+
+echo "ERROR: Invalid action: $action"
+exit 1
