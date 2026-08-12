@@ -1,0 +1,102 @@
+#!/bin/csh -f
+
+set thunder_src = "/home/project/post/thunder_merge"
+set pv_src      = "/home/project/verify/temp"
+set rcsi_src    = "/home/project/pr/RCSI/temp"
+set layout_root = "/home/project/postLayout"
+
+# Get vername from argument, or enter it interactively.
+if ($#argv >= 1) then
+    set vername = "$argv[1]"
+else
+    echo -n "Enter vername: "
+    set vername = "$<"
+endif
+
+# Keep vername safe for both the directory name and sed replacement.
+echo "$vername" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+if ($status != 0) then
+    echo "ERROR: Invalid vername."
+    exit 1
+endif
+
+set thunder_run = "/home/project/post/$vername"
+set pv_run      = "/home/project/verify/$vername"
+set rcsi_run    = "/home/project/pr/RCSI/$vername"
+set layout_run  = "$layout_root/$vername"
+
+if ( ! -d "$thunder_src" ) then
+    echo "ERROR: Source not found: $thunder_src"
+    exit 1
+endif
+
+if ( ! -d "$pv_src" ) then
+    echo "ERROR: Source not found: $pv_src"
+    exit 1
+endif
+
+if ( ! -d "$rcsi_src" ) then
+    echo "ERROR: Source not found: $rcsi_src"
+    exit 1
+endif
+
+if ( ! -d "$layout_root" ) then
+    echo "ERROR: Directory not found: $layout_root"
+    exit 1
+endif
+
+if ( -e "$thunder_run" ) then
+    echo "ERROR: Version already exists: $thunder_run"
+    exit 1
+endif
+
+if ( -e "$pv_run" ) then
+    echo "ERROR: Version already exists: $pv_run"
+    exit 1
+endif
+
+if ( -e "$rcsi_run" ) then
+    echo "ERROR: Version already exists: $rcsi_run"
+    exit 1
+endif
+
+if ( -e "$layout_run" ) then
+    echo "ERROR: Version already exists: $layout_run"
+    exit 1
+endif
+
+# Create Thunder Merge, PV, and RCSI run directories.
+cp -R "$thunder_src" "$thunder_run"
+if ($status != 0) exit 1
+
+cp -R "$pv_src" "$pv_run"
+if ($status != 0) exit 1
+
+cp -R "$rcsi_src" "$rcsi_run"
+if ($status != 0) exit 1
+
+# Replace DVER in all copied text files that contain it.
+grep -rIlZ -- 'DVER' "$thunder_run" "$pv_run" "$rcsi_run" | xargs -0 -r sed -i "s/DVER/$vername/g"
+if ($status != 0) then
+    echo "ERROR: Failed to replace DVER."
+    exit 1
+endif
+
+# Create one layout directory containing links to all run directories.
+mkdir "$layout_run"
+if ($status != 0) exit 1
+
+ln -s "$thunder_run" "$layout_run/thunder_merge"
+if ($status != 0) exit 1
+
+ln -s "$pv_run" "$layout_run/PV"
+if ($status != 0) exit 1
+
+ln -s "$rcsi_run" "$layout_run/RCSI"
+if ($status != 0) exit 1
+
+echo "Thunder Merge: $thunder_run"
+echo "PV            : $pv_run"
+echo "RCSI          : $rcsi_run"
+echo "Post Layout   : $layout_run"
+exit 0
