@@ -1,0 +1,56 @@
+#!/bin/csh -f
+
+if ( $#argv != 2 ) then
+    echo "Usage: $0 timing_report.gz output.csv"
+    exit 1
+endif
+
+gzip -cd "$1" | awk '
+BEGIN {
+    print "Path,Beginpoint,Endpoint,Slack_ns,Slack_ps"
+}
+
+function write_path() {
+    if (path != "" && beginpoint != "" && endpoint != "" &&
+        has_slack && slack > -0.200) {
+        printf "%s,\"%s\",\"%s\",%.6f,%.3f\n", \
+            path, beginpoint, endpoint, slack, slack * 1000
+    }
+}
+
+/^Path[[:space:]]+[0-9]+:/ {
+    write_path()
+    path = $2
+    sub(/:$/, "", path)
+    beginpoint = endpoint = ""
+    has_slack = 0
+    next
+}
+
+/^[[:space:]]*Beginpoint:/ {
+    sub(/^[[:space:]]*Beginpoint:[[:space:]]*/, "")
+    split($0, a, /[[:space:]]+/)
+    beginpoint = a[1]
+    next
+}
+
+/^[[:space:]]*Endpoint:/ {
+    sub(/^[[:space:]]*Endpoint:[[:space:]]*/, "")
+    split($0, a, /[[:space:]]+/)
+    endpoint = a[1]
+    next
+}
+
+/Slack Time/ {
+    line = $0
+    sub(/^.*Slack Time[[:space:]]*/, "", line)
+    if (match(line, /[-+]?[0-9]*\.?[0-9]+/)) {
+        slack = substr(line, RSTART, RLENGTH) + 0
+        has_slack = 1
+    }
+}
+
+END {
+    write_path()
+}
+' > "$2"
