@@ -1,0 +1,114 @@
+#========================================================
+# Generate X16 sizing ECO from min_period SI report
+#========================================================
+
+set RPT_FILE "minperiod_si.rpt"
+set ECO_FILE "size_si_x16.tcl"
+
+# Unit: ns
+set DELTA_THRESHOLD 0.010
+
+set fin  [open $RPT_FILE r]
+set fout [open $ECO_FILE w]
+
+array set seen {}
+
+set last_driver ""
+set last_ref ""
+set count 0
+
+while {[gets $fin line] >= 0} {
+
+    # Reset when entering a new timing path
+    if {[regexp {^\s*Pin:} $line]} {
+        set last_driver ""
+        set last_ref ""
+        continue
+    }
+
+    # Match cell pin and reference
+    if {![regexp {^\s*(\S+)\s+\(([^)]+)\)(.*)$} \
+        $line -> pin ref tail]} {
+        continue
+    }
+
+    # Output row:
+    # .../O (INVCKPCRMX6)  0.054 & 0.200 f
+    #
+    # Store driver for next net arc.
+    if {[regexp {^\s*[-+]?[0-9.]+\s+&} $tail]} {
+
+        if {[regexp {^(.+)/[^/]+$} $pin -> inst]} {
+            set last_driver $inst
+            set last_ref $ref
+        }
+
+        continue
+    }
+
+    # Input row:
+    # .../I (INVCKPCRMX6) 0.000 0.006 & 0.146 r
+    #
+    # First number = Delta
+    # Second number = Incr
+    if {![regexp \
+        {^\s*([-+]?[0-9.]+)\s+([-+]?[0-9.]+)\s+&} \
+        $tail -> delta incr]} {
+        continue
+    }
+
+    # Filter SI delta
+    if {[expr {abs(double($delta))}] < $DELTA_THRESHOLD} {
+        continue
+    }
+
+    # Only size clock BUF/INV drivers
+    if {![regexp {^(INVCK|BUFCK)} $last_ref]} {
+        continue
+    }
+
+    # Replace drive strength
+    if {![regexp {^(.*MX)[0-9]+$} $last_ref -> prefix]} {
+        continue
+    }
+
+    set new_ref "${prefix}16"
+
+    if {$new_ref eq $last_ref} {
+        continue
+    }
+
+    if {$last_driver eq ""} {
+        continue
+    }
+
+    # Avoid duplicate resizing
+    if {[info exists seen($last_driver)]} {
+        continue
+    }
+
+    # Find equivalent library cell
+    set libcells [get_lib_cells -quiet "*/${new_ref}"]
+
+    if {[sizeof_collection $libcells] != 1} {
+        puts "SKIP: $last_driver target=$new_ref"
+        continue
+    }
+
+    set target [get_object_name $libcells]
+
+    puts "SIZE: $last_driver $last_ref -> $target delta=$delta"
+
+    puts $fout "size_cell {$last_driver} {$target}"
+
+    set seen($last_driver) 1
+    incr count
+}
+
+close $fin
+close $fout
+
+puts "=================================="
+puts "Total cells to size: $count"
+puts "ECO file: $ECO_FILE"
+puts "=================================="
